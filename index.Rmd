@@ -8,23 +8,81 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+## Predicting the classe variable
 
-## R Markdown
-
-This is a bla bla R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
+Data manipulation: I load the data, select only the variables which don't contain a lot of missing values, extract only day and hour from the more complete time information, and transform certain variables to factors.
 ```{r cars}
-summary(cars)
+setwd("C:/Users/Pigkappa/Dropbox/Data_Science/course_8/MLAssignment/")
+training.data = read.csv("pml-training.csv", stringsAsFactors = F)
+training.data = training.data[,c(2,5,8,9,10,11,37, 38, 39, 
+                                 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 
+                                 60, 61, 62, 63, 64, 65, 66, 67, 68, 
+                                 84, 85, 86, 102, 113, 114, 115, 116, 117, 118, 119, 120,
+                                 121, 122, 123, 124, 140, 
+                                 151, 152, 153, 154, 155, 156, 157, 158, 159, 160)]
+training.data$day = c("a")
+training.data$time = c("a")
+for (i in 1:nrow(training.data))
+    training.data[i,"day"] = substr(training.data[i,2],1,2)     #creates factor "day" column
+for (i in 1:nrow(training.data))
+    training.data[i,"time"] = substr(training.data[i,2],12,13)  #creates factor "time" column
+
+training.data = training.data[,-2]                              #removes timestamp
+training.data = transform(training.data, 
+                          user_name = factor(user_name),
+                          day = factor(day),
+                          time = factor(time),
+                          classe = factor(classe))
+```
+Histogram to check that the classes are roughly similarly populated (otherwise several algorithms fail):
+```{r, echo=FALSE}
+hist(as.numeric(training.data$classe))  # checking that classes are similarly populated
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+I load caret and divide the observations into a training set and a validation set:
+```{r}
+library(caret); set.seed(1)
+inTrain = createDataPartition(training.data$classe, p = 0.8, list = F)
+training.set = training.data[inTrain,]
+validation.set = training.data[-inTrain,]
 ```
+I will fit 3 models: linear discriminant analysis, random forest, and boosting with trees. For the linear discriminant analysis, I perform 10-fold cross validation. (Note the warnings - they show that the predictors are strongly collinear and lda may not be the best algorithm)
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+train.control.cv = trainControl(method = "cv", number = 10)
+lda.fit = train(classe ~ ., training.set, method = "lda", trainControl = train.control.cv)
+lda.fit
+```
+We see that the accuracy is approximately 0.73. I have tried doing these analysis with fewer variables (selected based on their importance in the random forest model below) but the results did not improve.
+I fit a random forest model. I use the randomForest library because it performs slightly faster than caret. There is no need for cross-validation to estimate the accuracy as it is seen from the out-of-bag performance.
+```{r}
+library(randomForest)       #faster than caret, still takes a while to run
+rf.fit = randomForest(classe~., training.set, importance = T,
+                        ntree = 500, mtry = 7)
+rf.fit
+```
+We see that the accuracy is very good: 99.62%. It may be worth exploring the parameter space (for example using more trees) but this model takes several minutes on my computer to be estimated and so I will just accept this model as satisfying.
+
+Finally, I estimate a model which uses boosting. 
+
+```{r}
+boosting.grid = data.frame(n.trees = 1000,interaction.depth = 1,shrinkage = 0.01, n.minobsinnode = 10)
+train.control.gbm = trainControl(method = "repeatedcv", number = 2,repeats = 1, 
+                                 verboseIter = FALSE,returnResamp = "all")
+boosting.fit = train(classe ~ .,data = training.set,method = "gbm",
+                     trControl = train.control.gbm,tuneGrid = boosting.grid, verbose = F)
+boosting.fit #accuracy of 0.80 or so
+```
+The accuracy of this model is about 82%. This model also takes a long time to run on my computer; for this reason, I only used 2-fold cross validation, and didn't do a parameter space exploration.
+
+Finally, I use the models on the validation set:
+```{r}
+lda.predictions = predict(lda.fit, validation.set)
+rf.predictions = predict(rf.fit, validation.set)
+boosting.predictions = predict(boosting.fit, validation.set)
+
+confusionMatrix(lda.predictions, validation.set$classe)
+confusionMatrix(rf.predictions, validation.set$classe)
+confusionMatrix(boosting.predictions, validation.set$classe)
+```
+We see that the random forest model performs best, with 99.5% accuracy. The other models are significantly inferior.
