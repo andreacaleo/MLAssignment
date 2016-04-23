@@ -1,4 +1,4 @@
 # MLAssignment
 Machine Learning Assignment for Coursera
 
-And some extra content written on my laptop!
+The compiled solution is visible at http://andreacaleo.github.io/MLAssignment/ 
